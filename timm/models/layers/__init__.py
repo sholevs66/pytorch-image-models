@@ -1,6 +1,7 @@
 from .activations import *
 from .adaptive_avgmax_pool import \
     adaptive_avgmax_pool2d, select_adaptive_pool2d, AdaptiveAvgMaxPool2d, SelectAdaptivePool2d
+from .affine import Affine
 from .blur_pool import BlurPool2d
 from .classifier import ClassifierHead, create_classifier
 from .cond_conv2d import CondConv2d, get_condconv_initializer
