@@ -7,6 +7,7 @@ canonical PyTorch, standard Python style, and good performance. Repurpose as you
 
 Hacked together by Ross Wightman (https://github.com/rwightman)
 """
+from typing import Union, List, Tuple
 import argparse
 import os
 import csv
@@ -43,6 +44,65 @@ except AttributeError:
 
 torch.backends.cudnn.benchmark = True
 _logger = logging.getLogger('validate')
+
+
+_shape_t = Union[int, List[int], torch.Size]
+
+
+class LayerNorm(torch.nn.Module):
+    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
+    normalized_shape: Tuple[int, ...]
+    eps: float
+    elementwise_affine: bool
+
+    def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(LayerNorm, self).__init__()
+        self.normalized_shape = tuple(
+            normalized_shape)  # type: ignore[arg-type]
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = torch.nn.Parameter(torch.empty(
+                self.normalized_shape, **factory_kwargs))
+            self.bias = torch.nn.Parameter(torch.empty(
+                self.normalized_shape, **factory_kwargs))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        if self.elementwise_affine:
+            torch.nn.init.ones_(self.weight)
+            torch.nn.init.zeros_(self.bias)
+
+    def _broadcast_constant(self, constant, shape):
+        x = constant
+        if len(x.size()) == 0:
+            x = x.view([1]*len(shape))
+        else:
+            x = x.unsqueeze(0)
+            x = x.unsqueeze(2)
+        x = x.expand(shape)
+        return x
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        if self.var is None or self.mean is None:
+            dynamic_var, dynamic_mean = torch.var_mean(input, (-1,), unbiased=False, keepdim=True)
+        var = self._broadcast_constant(self.var, input.size()) if self.var is not None else dynamic_var
+        mean = self._broadcast_constant(self.mean, input.size()) if self.mean is not None else dynamic_mean
+        x = (input - mean) / torch.sqrt(var + self.eps)
+        if not self.elementwise_affine:
+            return x
+        return self.bias + self.weight * x
+
+    def extra_repr(self) -> str:
+        return '{normalized_shape}, eps={eps}, ' \
+            'elementwise_affine={elementwise_affine}'.format(
+                **self.__dict__)
 
 
 class SaveOutput:
@@ -133,6 +193,10 @@ parser.add_argument('--num-images', type=int,
                     help='Number of images to evaluate. Defaults to entire dataset.')
 parser.add_argument('--save-outputs', action='store_true')
 parser.add_argument('--replace-layers', action='store_true')
+parser.add_argument('--use-dynamic-var', action='store_true')
+parser.add_argument('--use-dynamic-mean', action='store_true')
+parser.add_argument('--mean-num-constants', type=str, choices=['1', 'N'], default='N')
+parser.add_argument('--var-num-constants', type=str, choices=['1', 'N'], default='N')
 
 
 def validate(args):
@@ -191,63 +255,10 @@ def validate(args):
         model = torch.jit.script(model)
 
     def replace_layers(model, prefix=''):
-        from typing import Union, List, Tuple
-        _shape_t = Union[int, List[int], torch.Size]
-
-        class LayerNorm(torch.nn.Module):
-            __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
-            normalized_shape: Tuple[int, ...]
-            eps: float
-            elementwise_affine: bool
-
-            def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True,
-                         device=None, dtype=None) -> None:
-                factory_kwargs = {'device': device, 'dtype': dtype}
-                super(LayerNorm, self).__init__()
-                self.normalized_shape = tuple(
-                    normalized_shape)  # type: ignore[arg-type]
-                self.eps = eps
-                self.elementwise_affine = elementwise_affine
-                if self.elementwise_affine:
-                    self.weight = torch.nn.Parameter(torch.empty(
-                        self.normalized_shape, **factory_kwargs))
-                    self.bias = torch.nn.Parameter(torch.empty(
-                        self.normalized_shape, **factory_kwargs))
-                else:
-                    self.register_parameter('weight', None)
-                    self.register_parameter('bias', None)
-
-                self.reset_parameters()
-
-            def reset_parameters(self) -> None:
-                if self.elementwise_affine:
-                    torch.nn.init.ones_(self.weight)
-                    torch.nn.init.zeros_(self.bias)
-
-            def _broadcast_constant(self, constant, shape):
-                x = constant
-                if len(x.size()) == 0:
-                    x = x.view([1]*len(shape))
-                else:
-                    x = x.unsqueeze(0)
-                    x = x.unsqueeze(2)
-                x = x.expand(shape)
-                return x
-
-            def forward(self, input: torch.Tensor) -> torch.Tensor:
-                # var, mean = torch.var_mean(input, (-1,), unbiased=False, keepdim=True)
-                var, mean = self._broadcast_constant(
-                    self.var, input.size()), self._broadcast_constant(self.mean, input.size())
-                x = (input - mean) / torch.sqrt(var + self.eps)
-                if not self.elementwise_affine:
-                    return x
-                return self.bias + self.weight * x
-
-            def extra_repr(self) -> str:
-                return '{normalized_shape}, eps={eps}, ' \
-                    'elementwise_affine={elementwise_affine}'.format(
-                        **self.__dict__)
-
+        assert args.mean_num_constants in ['1', 'N']
+        assert args.var_num_constants in ['1', 'N']
+        mean_suffix = 'mean' if args.mean_num_constants == '1' else 'mean_token'
+        var_suffix = 'var' if args.var_num_constants == '1' else 'var_token'
         data = np.load(f'{args.model}_layernorm.npz')
         for name, layer in model.named_children():
             if isinstance(layer, torch.nn.LayerNorm):
@@ -255,10 +266,10 @@ def validate(args):
                                       elementwise_affine=layer.elementwise_affine)
                 new_layer.weight = layer.weight
                 new_layer.bias = layer.bias
-                mu = np.mean(data[f'{prefix}{name}/mean'], 0)
-                v = np.mean(data[f'{prefix}{name}/var'], 0)
-                new_layer.mean = torch.nn.Parameter(torch.tensor(mu))
-                new_layer.var = torch.nn.Parameter(torch.tensor(v))
+                mu = np.mean(data[f'{prefix}{name}/{mean_suffix}'], 0)
+                v = np.mean(data[f'{prefix}{name}/{var_suffix}'], 0)
+                new_layer.mean = torch.nn.Parameter(torch.tensor(mu)) if not args.use_dynamic_mean else None
+                new_layer.var = torch.nn.Parameter(torch.tensor(v)) if not args.use_dynamic_var else None
                 model.add_module(name, new_layer)
                 continue
 
@@ -280,11 +291,13 @@ def validate(args):
     criterion = nn.CrossEntropyLoss().cuda()
 
     outputs = []
-    for name, layer in model.named_modules():
-        if isinstance(layer, torch.nn.LayerNorm):
-            output = SaveOutput()
-            handle = layer.register_forward_hook(output)
-            outputs.append((name, output, handle))
+    if args.save_outputs:
+        for name, layer in model.named_modules():
+            if isinstance(layer, torch.nn.LayerNorm):
+                output = SaveOutput()
+                handle = layer.register_forward_hook(output)
+                outputs.append((name, output, handle))
+
     dataset = create_dataset(
         root=args.data, name=args.dataset, split=args.split,
         load_bytes=args.tf_preprocessing, class_map=args.class_map)
