@@ -191,6 +191,34 @@ class ResBlock(nn.Module):
         return x
 
 
+class ResBlock_v2(nn.Module):
+    """ Residual MLP block w/ LayerScale and Affine 'norm'
+
+    Based on: `ResMLP: Feedforward networks for image classification...` - https://arxiv.org/abs/2105.03404
+    """
+
+    def __init__(
+            self, dim, seq_len, mlp_ratio=4, mlp_layer=Mlp, norm_layer=Affine,
+            act_layer=nn.GELU, init_values=1e-4, drop=0., drop_path=0.):
+        super().__init__()
+        channel_dim = int(dim * mlp_ratio)
+        self.norm1 = norm_layer(seq_len)
+        self.linear_tokens = nn.Linear(seq_len, seq_len)
+        self.drop_path = DropPath(
+            drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        self.mlp_channels = mlp_layer(
+            dim, channel_dim, act_layer=act_layer, drop=drop)
+        self.ls1 = nn.Parameter(init_values * torch.ones(seq_len))
+        self.ls2 = nn.Parameter(init_values * torch.ones(dim))
+
+    def forward(self, x):
+        newvariable379 = (
+            self.ls1 * self.linear_tokens(self.norm1(x.transpose(1, 2))))
+        x = x + self.drop_path((newvariable379).transpose(1, 2))
+        x = x + self.drop_path(self.ls2 * self.mlp_channels(self.norm2(x)))
+        return x
+
 class SpatialGatingUnit(nn.Module):
     """ Spatial Gating Unit
 
@@ -490,6 +518,39 @@ def resmlp_12_224(pretrained=False, **kwargs):
     """
     model_args = dict(
         patch_size=16, num_blocks=12, embed_dim=384, mlp_ratio=4, block_layer=ResBlock, norm_layer=Affine, **kwargs)
+    model = _create_mixer('resmlp_12_224', pretrained=pretrained, **model_args)
+    return model
+
+
+@register_model
+def resmlp_12_224_relu(pretrained=False, **kwargs):
+    """ ResMLP-12
+    Paper: `ResMLP: Feedforward networks for image classification...` - https://arxiv.org/abs/2105.03404
+    """
+    model_args = dict(
+        patch_size=16, num_blocks=12, embed_dim=384, mlp_ratio=4, block_layer=ResBlock, norm_layer=Affine, act_layer=nn.ReLU, **kwargs)
+    model = _create_mixer('resmlp_12_224', pretrained=pretrained, **model_args)
+    return model
+
+
+@register_model
+def resmlp_4_224_relu(pretrained=False, **kwargs):
+    """ ResMLP-12
+    Paper: `ResMLP: Feedforward networks for image classification...` - https://arxiv.org/abs/2105.03404
+    """
+    model_args = dict(
+        patch_size=16, num_blocks=4, embed_dim=384, mlp_ratio=4, block_layer=ResBlock, norm_layer=Affine, act_layer=nn.ReLU, **kwargs)
+    model = _create_mixer('resmlp_12_224', pretrained=pretrained, **model_args)
+    return model
+
+
+@register_model
+def resmlp_12_224_relu_custom(pretrained=False, **kwargs):
+    """ ResMLP-12
+    Paper: `ResMLP: Feedforward networks for image classification...` - https://arxiv.org/abs/2105.03404
+    """
+    model_args = dict(
+        patch_size=16, num_blocks=12, embed_dim=384, mlp_ratio=4, block_layer=ResBlock_v2, norm_layer=Affine, act_layer=nn.ReLU, **kwargs)
     model = _create_mixer('resmlp_12_224', pretrained=pretrained, **model_args)
     return model
 
