@@ -803,11 +803,31 @@ def deit_tiny_patch16_224(pretrained=False, **kwargs):
 
 
 @register_model
+def deit_tiny_patch16_224_relu(pretrained=False, **kwargs):
+    """ DeiT-tiny model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
+    ImageNet-1k weights from https://github.com/facebookresearch/deit.
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, act_layer=nn.ReLU, **kwargs)
+    model = _create_vision_transformer('deit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+@register_model
 def deit_small_patch16_224(pretrained=False, **kwargs):
     """ DeiT-small model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
     ImageNet-1k weights from https://github.com/facebookresearch/deit.
     """
     model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6, **kwargs)
+    model = _create_vision_transformer('deit_small_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+@register_model
+def deit_small_patch16_224_relu(pretrained=False, **kwargs):
+    """ DeiT-small model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
+    ImageNet-1k weights from https://github.com/facebookresearch/deit.
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6, act_layer=nn.ReLU, **kwargs)
     model = _create_vision_transformer('deit_small_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
