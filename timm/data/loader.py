@@ -14,7 +14,7 @@ import numpy as np
 
 from .transforms_factory import create_transform
 from .constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-from .distributed_sampler import OrderedDistributedSampler, RepeatAugSampler
+from .distributed_sampler import OrderedDistributedSampler, RepeatAugSampler, RASampler
 from .random_erasing import RandomErasing
 from .mixup import FastCollateMixup
 
@@ -161,6 +161,7 @@ def create_loader(
         vflip=0.,
         color_jitter=0.4,
         auto_augment=None,
+        use_ra_sampler=False,
         num_aug_repeats=0,
         num_aug_splits=0,
         interpolation='bilinear',
@@ -207,8 +208,11 @@ def create_loader(
     sampler = None
     if distributed and not isinstance(dataset, torch.utils.data.IterableDataset):
         if is_training:
+            assert not (num_aug_repeats and use_ra_sampler), "num_aug_repeats not compatible with RASampler"
             if num_aug_repeats:
                 sampler = RepeatAugSampler(dataset, num_repeats=num_aug_repeats)
+            elif use_ra_sampler:
+                sampler = RASampler(dataset)
             else:
                 sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         else:
