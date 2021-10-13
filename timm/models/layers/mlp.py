@@ -3,27 +3,47 @@
 Hacked together by / Copyright 2020 Ross Wightman
 """
 from torch import nn as nn
+from .linear_bn import BatchNorm, fold_bn_linear
 
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
     """
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, norm_layer=None, drop=0., prenorm_layer=None):
         super().__init__()
+
+        norm_layer = norm_layer or nn.Identity
+        prenorm_layer = prenorm_layer or nn.Identity
+
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
+        self.prenorm = prenorm_layer(in_features)
         self.fc1 = nn.Linear(in_features, hidden_features)
+        self.norm = norm_layer(hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
+        if self.prenorm:
+            x = self.prenorm(x)
         x = self.fc1(x)
+        x = self.norm(x)
         x = self.act(x)
         x = self.drop(x)
         x = self.fc2(x)
         x = self.drop(x)
         return x
+
+    def fuse_bn(self):
+        if isinstance(self.prenorm, BatchNorm):
+            new_linear = fold_bn_linear(self.prenorm, self.fc1)
+
+            self.prenorm = None
+            self.fc1 = new_linear
+
+        return self
 
 
 class GluMlp(nn.Module):

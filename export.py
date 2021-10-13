@@ -133,6 +133,16 @@ def replace_layers(model):
         replace_layers(layer)
 
 
+def fuse_bn(model):
+    for name, layer in model.named_children():
+        if hasattr(layer, 'fuse_bn'):
+            new_layer = layer.fuse_bn()
+            model.add_module(name, new_layer)
+            continue
+
+        fuse_bn(layer)
+
+
 def main():
     setup_default_logging()
     args, args_text = _parse_args()
@@ -160,10 +170,14 @@ def main():
         load_checkpoint(model, args.checkpoint, args.use_ema)
 
     replace_layers(model)
+    if args.fuse_bn:
+        fuse_bn(model)
 
     model.eval()
 
-    torch.onnx.export(model, torch.zeros(1, 3, 224, 224), f'{args.model}.onnx', opset_version=11)
+    input_size = args.input_size or model.default_cfg['input_size']
+    torch.onnx.export(model, torch.zeros(1, *input_size),
+                      f'{args.model}.onnx', opset_version=11)
 
 
 if __name__ == '__main__':

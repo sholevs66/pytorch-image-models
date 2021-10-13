@@ -47,7 +47,7 @@ import torch.nn as nn
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from .helpers import build_model_with_cfg, overlay_external_default_cfg, named_apply
-from .layers import PatchEmbed, Mlp, GluMlp, GatedMlp, DropPath, lecun_normal_, to_2tuple
+from .layers import PatchEmbed, Mlp, GluMlp, GatedMlp, DropPath, lecun_normal_, to_2tuple, BatchNorm
 from .registry import register_model
 
 
@@ -523,6 +523,17 @@ def resmlp_12_224(pretrained=False, **kwargs):
 
 
 @register_model
+def resmlp_12_224_bn_relu(pretrained=False, **kwargs):
+    """ ResMLP-12
+    Paper: `ResMLP: Feedforward networks for image classification...` - https://arxiv.org/abs/2105.03404
+    """
+    model_args = dict(
+        patch_size=16, num_blocks=12, embed_dim=384, mlp_ratio=4, block_layer=ResBlock, norm_layer=BatchNorm, act_layer=nn.ReLU, **kwargs)
+    model = _create_mixer('resmlp_12_224', pretrained=pretrained, **model_args)
+    return model
+
+
+@register_model
 def resmlp_12_224_relu(pretrained=False, **kwargs):
     """ ResMLP-12
     Paper: `ResMLP: Feedforward networks for image classification...` - https://arxiv.org/abs/2105.03404
@@ -540,6 +551,17 @@ def resmlp_4_224_relu(pretrained=False, **kwargs):
     """
     model_args = dict(
         patch_size=16, num_blocks=4, embed_dim=384, mlp_ratio=4, block_layer=ResBlock, norm_layer=Affine, act_layer=nn.ReLU, **kwargs)
+    model = _create_mixer('resmlp_12_224', pretrained=pretrained, **model_args)
+    return model
+
+
+@register_model
+def resmlp_4_224_bn_relu(pretrained=False, **kwargs):
+    """ ResMLP-12
+    Paper: `ResMLP: Feedforward networks for image classification...` - https://arxiv.org/abs/2105.03404
+    """
+    model_args = dict(
+        patch_size=16, num_blocks=4, embed_dim=384, mlp_ratio=4, block_layer=ResBlock, norm_layer=BatchNorm, act_layer=nn.ReLU, **kwargs)
     model = _create_mixer('resmlp_12_224', pretrained=pretrained, **model_args)
     return model
 

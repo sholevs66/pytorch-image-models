@@ -34,7 +34,7 @@ import torch.nn.functional as F
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from .helpers import build_model_with_cfg, named_apply, adapt_input_conv
-from .layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_
+from .layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_, BatchNorm
 from .registry import register_model
 
 _logger = logging.getLogger(__name__)
@@ -176,7 +176,7 @@ default_cfgs = {
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0., prenorm_layer=None, proj_norm_layer=None):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
@@ -187,7 +187,14 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
+        prenorm_layer = prenorm_layer or nn.Identity
+        self.prenorm = prenorm_layer(dim)
+
+        proj_norm_layer = proj_norm_layer or nn.Identity
+        self.proj_norm = proj_norm_layer(dim)
+
     def forward(self, x):
+        x = self.prenorm(x)
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
@@ -198,6 +205,7 @@ class Attention(nn.Module):
 
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
+        x = self.proj_norm(x)
         x = self.proj_drop(x)
         return x
 
@@ -205,19 +213,40 @@ class Attention(nn.Module):
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_norm_layer=None, attn_proj_norm_layer=None):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
+        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop,
+                              proj_drop=drop, prenorm_layer=None, proj_norm_layer=attn_proj_norm_layer)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
+                       act_layer=act_layer, norm_layer=mlp_norm_layer, drop=drop, prenorm_layer=None)
 
     def forward(self, x):
         x = x + self.drop_path(self.attn(self.norm1(x)))
         x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
+class Block_V2(nn.Module):
+
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, mlp_norm_layer=None, attn_proj_norm_layer=None):
+        super().__init__()
+        self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop,
+                              proj_drop=drop, prenorm_layer=norm_layer, proj_norm_layer=attn_proj_norm_layer)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim,
+                       act_layer=act_layer, norm_layer=mlp_norm_layer, drop=drop, prenorm_layer=norm_layer)
+
+    def forward(self, x):
+        x = x + self.drop_path(self.attn(x))
+        x = x + self.drop_path(self.mlp(x))
         return x
 
 
@@ -233,8 +262,8 @@ class VisionTransformer(nn.Module):
 
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
-                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init=''):
+                 drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, block_layer=Block,
+                 norm_layer=None, mlp_norm_layer=None,  attn_proj_norm_layer=None, act_layer=None, weight_init=''):
         """
         Args:
             img_size (int, tuple): input image size
@@ -273,9 +302,9 @@ class VisionTransformer(nn.Module):
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.Sequential(*[
-            Block(
+            block_layer(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop_rate,
-                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer)
+                attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, mlp_norm_layer=mlp_norm_layer,  attn_proj_norm_layer=attn_proj_norm_layer, act_layer=act_layer)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
@@ -545,6 +574,26 @@ def _create_vision_transformer(variant, pretrained=False, default_cfg=None, **kw
 
 
 @register_model
+def vit_tiny_bn_ffnbn_patch16_224(pretrained=False, **kwargs):
+    """ ViT-Tiny (Vit-Ti/16)
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3,
+                        block_layer=Block_V2, norm_layer=BatchNorm, mlp_norm_layer=BatchNorm, **kwargs)
+    model = _create_vision_transformer(
+        'vit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def vit_tiny_bn_ffnbn_relu_patch16_224(pretrained=False, **kwargs):
+    """ ViT-Tiny (Vit-Ti/16)
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, act_layer=nn.ReLU,
+                        block_layer=Block_V2, norm_layer=BatchNorm, mlp_norm_layer=BatchNorm, **kwargs)
+    model = _create_vision_transformer(
+        'vit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
 def vit_tiny_patch16_224(pretrained=False, **kwargs):
     """ ViT-Tiny (Vit-Ti/16)
     """
@@ -587,6 +636,29 @@ def vit_small_patch16_224(pretrained=False, **kwargs):
     """
     model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6, **kwargs)
     model = _create_vision_transformer('vit_small_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
+
+
+@register_model
+def vit_small_bn_ffnbn_patch16_224(pretrained=False, **kwargs):
+    """ ViT-Small (ViT-S/16)
+    NOTE I've replaced my previous 'small' model definition and weights with the small variant from the DeiT paper
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6,
+                        block_layer=Block_V2, norm_layer=BatchNorm, mlp_norm_layer=BatchNorm, **kwargs)
+    model = _create_vision_transformer(
+        'vit_small_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
+
+@register_model
+def vit_small_bn_ffnbn_relu_patch16_224(pretrained=False, **kwargs):
+    """ ViT-Small (ViT-S/16)
+    NOTE I've replaced my previous 'small' model definition and weights with the small variant from the DeiT paper
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=384, depth=12, num_heads=6,
+                        block_layer=Block_V2, act_layer=nn.ReLU, norm_layer=BatchNorm, mlp_norm_layer=BatchNorm, **kwargs)
+    model = _create_vision_transformer(
+        'vit_small_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
 
@@ -858,6 +930,18 @@ def deit_tiny_distilled_patch16_224(pretrained=False, **kwargs):
     ImageNet-1k weights from https://github.com/facebookresearch/deit.
     """
     model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, **kwargs)
+    model = _create_vision_transformer(
+        'deit_tiny_distilled_patch16_224', pretrained=pretrained,  distilled=True, **model_kwargs)
+    return model
+
+
+@register_model
+def deit_tiny_distilled_bn_ffnbn_relu_patch16_224(pretrained=False, **kwargs):
+    """ DeiT-tiny distilled model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
+    ImageNet-1k weights from https://github.com/facebookresearch/deit.
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=192, act_layer=nn.ReLU, block_layer=Block_V2,
+                        norm_layer=BatchNorm, mlp_norm_layer=BatchNorm, depth=12, num_heads=3, **kwargs)
     model = _create_vision_transformer(
         'deit_tiny_distilled_patch16_224', pretrained=pretrained,  distilled=True, **model_kwargs)
     return model

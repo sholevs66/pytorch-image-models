@@ -108,6 +108,10 @@ parser.add_argument('--real-labels', default='', type=str, metavar='FILENAME',
                     help='Real labels JSON file for imagenet evaluation')
 parser.add_argument('--valid-labels', default='', type=str, metavar='FILENAME',
                     help='Valid label indices txt file for validation of partial label space')
+parser.add_argument('--fuse-bn', action='store_true', default=True,
+                    help='fuse batch normalization in supported layers')
+parser.add_argument('--no-fuse-bn', action='store_false', dest='fuse_bn',
+                    help='do not fuse batch normalization layers')
 
 
 def validate(args):
@@ -208,7 +212,19 @@ def validate(args):
     top1 = AverageMeter()
     top5 = AverageMeter()
 
+    def fuse_bn(model):
+        for name, layer in model.named_children():
+            if hasattr(layer, 'fuse_bn'):
+                new_layer = layer.fuse_bn()
+                model.add_module(name, new_layer)
+                continue
+
+            fuse_bn(layer)
+
+
     model.eval()
+    if args.fuse_bn:
+        fuse_bn(model)
     with torch.no_grad():
         # warmup, reduce variability of first batch time, especially for comparing torchscript vs non
         input = torch.randn((args.batch_size,) + tuple(data_config['input_size'])).cuda()
