@@ -42,10 +42,12 @@ class ConvMixer(nn.Module):
             activation(),
             nn.BatchNorm2d(dim)
         )
+     
+        padding = self._calculate_same_padding(kernel_size)
         self.blocks = nn.Sequential(
             *[nn.Sequential(
                     Residual(nn.Sequential(
-                        nn.Conv2d(dim, dim, kernel_size, groups=dim, padding="same"),
+                        nn.Conv2d(dim, dim, kernel_size, groups=dim, padding=padding),
                         activation(),
                         nn.BatchNorm2d(dim)
                     )),
@@ -58,6 +60,14 @@ class ConvMixer(nn.Module):
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten()
         )
+
+    def _calculate_same_padding(self, kernel_size):
+        dilation = 1
+        total_padding = dilation * (kernel_size - 1)
+        left_pad = total_padding // 2
+        right_pad = total_padding - left_pad
+        padding = (left_pad, right_pad)
+        return padding
 
     def get_classifier(self):
         return self.head
