@@ -177,7 +177,7 @@ def main():
 
     input_size = args.input_size or model.default_cfg['input_size']
     torch.onnx.export(model, torch.zeros(1, *input_size),
-                      f'{args.model}.onnx', opset_version=11)
+                      f'{args.model}.onnx', training=torch.onnx.TrainingMode.PRESERVE, opset_version=11)
 
 
 if __name__ == '__main__':

@@ -36,6 +36,7 @@ from timm.loss import *
 from timm.optim import create_optimizer_v2, optimizer_kwargs
 from timm.scheduler import create_scheduler
 from timm.utils import ApexScaler, NativeScaler
+from timm.utils.load_model import load_pretrained_weights_soft
 
 try:
     from apex import amp
@@ -87,6 +88,8 @@ parser.add_argument('--initial-checkpoint', default='', type=str, metavar='PATH'
                     help='Initialize model from this checkpoint (default: none)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='Resume full model and optimizer state from checkpoint (default: none)')
+parser.add_argument('--resume_soft', default='', type=str, metavar='PATH',
+                    help='Resume soft model - if match load it, if not, leave it (default: none)')
 parser.add_argument('--no-resume-opt', action='store_true', default=False,
                     help='prevent resume of optimizer state when resuming model')
 parser.add_argument('--num-classes', type=int, default=None, metavar='N',
@@ -126,6 +129,8 @@ parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
 parser.add_argument('--clip-mode', type=str, default='norm',
                     help='Gradient clipping mode. One of ("norm", "value", "agc")')
 
+parser.add_argument('--l1_act_reg', type=float, default=2e-6,
+                    help='weight decay (default: 2e-6)')
 
 # Learning rate schedule parameters
 parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
@@ -448,6 +453,11 @@ def main():
             loss_scaler=None if args.no_resume_opt else loss_scaler,
             log_info=args.local_rank == 0)
 
+    # soft loading model weights - if layer match - load it / if layer not match - leave it
+    if args.resume_soft:
+        checkpoint = torch.load(args.resume_soft, map_location='cpu')
+        load_pretrained_weights_soft(model, checkpoint)
+
     # setup exponential moving average of model weights, SWA could be used here too
     model_ema = None
     if args.model_ema:
@@ -649,6 +659,16 @@ def main():
             _logger.info(
                 '*** Best metric: {0} (epoch {1})'.format(best_metric, best_epoch))
 
+
+################### omer hook function for l1 on layers activations ############################
+class OutputHook(list):
+    """ Hook to capture module outputs.
+    """
+    def __call__(self, module, input, output):
+        self.append(output)
+################################################################################################
+
+
 def train_one_epoch(
         epoch, model, loader, optimizer, loss_fn, args,
         lr_scheduler=None, saver=None, output_dir=None, amp_autocast=suppress,
@@ -667,6 +687,23 @@ def train_one_epoch(
 
     model.train()
 
+    '''
+    # l1 reg on activations
+    output_hook = OutputHook()
+    model.module.blocks[0].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[1].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[2].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[3].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[4].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[5].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[6].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[7].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[8].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[9].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[10].mlp.drop.register_forward_hook(output_hook)
+    model.module.blocks[11].mlp.drop.register_forward_hook(output_hook)
+    '''
+
     end = time.time()
     last_idx = len(loader) - 1
     num_updates = epoch * len(loader)
@@ -684,6 +721,15 @@ def train_one_epoch(
             output = model(input)
             loss = loss_fn(output, target)
 
+            '''
+            # l1 loss on activattions
+            l1_penalty = 0.
+            for (idx,output) in enumerate(output_hook):
+                if idx % 2 != 0:
+                    l1_penalty += torch.norm(output, 1)*args.l1_act_reg
+
+            loss += l1_penalty
+            '''
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
 
@@ -694,6 +740,7 @@ def train_one_epoch(
                 clip_grad=args.clip_grad, clip_mode=args.clip_mode,
                 parameters=model_parameters(model, exclude_head='agc' in args.clip_mode),
                 create_graph=second_order)
+
         else:
             loss.backward(create_graph=second_order)
             if args.clip_grad is not None:
@@ -750,6 +797,9 @@ def train_one_epoch(
 
         end = time.time()
         # end for
+
+        # for l1 reg on activations
+        #output_hook.clear()
 
     if hasattr(optimizer, 'sync_lookahead'):
         optimizer.sync_lookahead()
