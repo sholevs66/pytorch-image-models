@@ -176,29 +176,28 @@ class UN1d(nn.Module):
             mask_input = x[bn_mask, :]
         
         mask_input = mask_input.reshape(-1, self.num_features)
-
-        x = x.permute(0, 2, 1).contiguous()                 # BxNxC -> BxCxN
-        input_shape = x.size()
-        x = x.reshape(x.size(0), self.num_features, -1)     # BxCxN -> BxCxNx1
-        x = x.unsqueeze(-1)
         
         if self.training:
+            x = x.permute(0, 2, 1).contiguous()                 # BxNxC -> BxCxN
+            input_shape = x.size()
+            x = x.reshape(x.size(0), self.num_features, -1)     # BxCxN -> BxCxNx1
+            x = x.unsqueeze(-1)
+            
             self.iters.copy_(self.iters + 1)
             x = UN2dFunction.apply(x, self.weight, self.bias, self.running_var.view(1,self.num_features,1,1), self.ema_gz.view(1,self.num_features,1,1), self.eps, 
                                         self.momentum, self.buffer_x2, self.buffer_gz, self.iters, 
-                                        self.fp_buffer_size, self.bp_buffer_size, self.warmup_iters, self.outlier_filtration, self.skip_counter, mask_input)
+                                        self.fp_buffer_size, self.bp_buffer_size, self.warmup_iters, self.outlier_filtration, self.skip_counter, mask_input)            
+            x = x.reshape(input_shape)
+            x = x.permute(0, 2, 1).contiguous()
+            
+            # Reshape it.
+            if shaped_input:
+                x = x.squeeze(0)
+        
         else:
-            B, C, H, W = x.size()
-            var = self.running_var.view(1, C, 1, 1)
+            var = self.running_var
             x = x / (var + self.eps).sqrt()
-            x = self.weight.view(1,C,1,1) * x + self.bias.view(1,C,1,1)
+            x = self.weight * x + self.bias
 
-        
-        x = x.reshape(input_shape)
-        x = x.permute(0, 2, 1).contiguous()
-        
-        # Reshape it.
-        if shaped_input:
-            x = x.squeeze(0)
 
         return x
