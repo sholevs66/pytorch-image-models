@@ -34,7 +34,7 @@ import torch.nn.functional as F
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from .helpers import build_model_with_cfg, named_apply, adapt_input_conv
-from .layers import PatchEmbed, PatchConv, Mlp, DropPath, trunc_normal_, lecun_normal_, BatchNorm, MomentBatchNorm1dFilt, UN1dFilt, UN1dFilt_wo_permute
+from .layers import PatchEmbed, PatchConv, Mlp, DropPath, trunc_normal_, lecun_normal_, BatchNorm, UN1d
 from .registry import register_model
 
 _logger = logging.getLogger(__name__)
@@ -616,8 +616,8 @@ def vit_tiny_patch16_224_bn(pretrained=False, **kwargs):
     return model
 
 @register_model
-def vit_tiny_patch16_224_unfilt(pretrained=False, **kwargs):
-    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, norm_layer=UN1dFilt_wo_permute, mlp_norm_layer=UN1dFilt_wo_permute, **kwargs)
+def vit_tiny_patch16_224_un_official(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, norm_layer=UN1d, mlp_norm_layer=UN1d, **kwargs)
     model = _create_vision_transformer('vit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
@@ -747,17 +747,8 @@ def vit_base_patchConv_224_bn(pretrained=False, **kwargs):
     return model
 
 @register_model
-def vit_base_patchConv_224_un(pretrained=False, **kwargs):
-    """ ViT-Base (ViT-B/16) from original paper (https://arxiv.org/abs/2010.11929).
-    ImageNet-1k weights fine-tuned from in21k @ 224x224, source https://github.com/google-research/vision_transformer.
-    """
-    model_kwargs = dict(patch_size=16, embed_dim=768, depth=11, num_heads=12, embed_layer=PatchConv, norm_layer=MomentBatchNorm1dFilt, mlp_norm_layer=MomentBatchNorm1dFilt, **kwargs)
-    model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
-    return model
-
-@register_model
-def vit_base_patch16_224_unfilt(pretrained=False, **kwargs):
-    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, norm_layer=UN1dFilt_wo_permute, mlp_norm_layer=UN1dFilt_wo_permute, **kwargs)
+def vit_base_patch16_224_un_official(pretrained=False, **kwargs):
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, norm_layer=UN1d, mlp_norm_layer=UN1d, **kwargs)
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 

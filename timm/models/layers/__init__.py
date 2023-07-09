@@ -21,7 +21,8 @@ from .global_context import GlobalContext
 from .helpers import to_ntuple, to_2tuple, to_3tuple, to_4tuple, make_divisible
 from .inplace_abn import InplaceAbn
 from .linear import Linear
-from .linear_bn import BatchNorm, fold_bn_linear, MomentBatchNorm1dFilt, UN1dFilt, UN1dFilt_wo_permute
+from .linear_bn import BatchNorm, fold_bn_linear
+from .unified_normalization import UN1d
 from .mixed_conv2d import MixedConv2d
 from .mlp import Mlp, GluMlp, GatedMlp
 from .non_local_attn import NonLocalAttn, BatNonLocalAttn
