@@ -616,7 +616,7 @@ def vit_tiny_patch16_224_bn(pretrained=False, **kwargs):
     return model
 
 @register_model
-def vit_tiny_patch16_224_un_official(pretrained=False, **kwargs):
+def vit_tiny_patch16_224_un(pretrained=False, **kwargs):
     model_kwargs = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3, norm_layer=UN1d, mlp_norm_layer=UN1d, **kwargs)
     model = _create_vision_transformer('vit_tiny_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
@@ -747,7 +747,7 @@ def vit_base_patchConv_224_bn(pretrained=False, **kwargs):
     return model
 
 @register_model
-def vit_base_patch16_224_un_official(pretrained=False, **kwargs):
+def vit_base_patch16_224_un(pretrained=False, **kwargs):
     model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, norm_layer=UN1d, mlp_norm_layer=UN1d, **kwargs)
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
