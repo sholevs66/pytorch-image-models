@@ -23,6 +23,7 @@ class Mlp(nn.Module):
             bias=True,
             drop=0.,
             use_conv=False,
+            prenorm_layer=None
     ):
         super().__init__()
         out_features = out_features or in_features
@@ -31,6 +32,8 @@ class Mlp(nn.Module):
         drop_probs = to_2tuple(drop)
         linear_layer = partial(nn.Conv2d, kernel_size=1) if use_conv else nn.Linear
 
+        prenorm_layer = prenorm_layer or nn.Identity
+        self.prenorm = prenorm_layer(in_features)
         self.fc1 = linear_layer(in_features, hidden_features, bias=bias[0])
         self.act = act_layer()
         self.drop1 = nn.Dropout(drop_probs[0])
@@ -39,7 +42,10 @@ class Mlp(nn.Module):
         self.drop2 = nn.Dropout(drop_probs[1])
 
     def forward(self, x):
+        if self.prenorm:
+            x = self.prenorm(x)
         x = self.fc1(x)
+        x = self.norm(x)
         x = self.act(x)
         x = self.drop1(x)
         x = self.fc2(x)

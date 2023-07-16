@@ -26,6 +26,9 @@ from timm.layers.global_context import GlobalContext
 from timm.layers.helpers import to_ntuple, to_2tuple, to_3tuple, to_4tuple, make_divisible, extend_tuple
 from timm.layers.inplace_abn import InplaceAbn
 from timm.layers.linear import Linear
+from .affine import Affine
+from .linear_bn import BatchNorm, fold_bn_linear
+from .unified_normalization import UN1d
 from timm.layers.mixed_conv2d import MixedConv2d
 from timm.layers.mlp import Mlp, GluMlp, GatedMlp, ConvMlp
 from timm.layers.non_local_attn import NonLocalAttn, BatNonLocalAttn

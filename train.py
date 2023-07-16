@@ -246,6 +246,8 @@ group.add_argument('--aa', type=str, default=None, metavar='NAME',
                    help='Use AutoAugment policy. "v0" or "original". (default: None)'),
 group.add_argument('--aug-repeats', type=float, default=0,
                    help='Number of augmentation repetitions (distributed training only) (default: 0)')
+parser.add_argument('--use-ra-sampler', action='store_true',
+                    help='use custom RASampler from Deit repository')
 group.add_argument('--aug-splits', type=int, default=0,
                    help='Number of augmentation splits (default: 0, valid: 0 or >=2)')
 group.add_argument('--jsd-loss', action='store_true', default=False,
