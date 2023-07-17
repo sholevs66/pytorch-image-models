@@ -1,5 +1,5 @@
-torch>=1.7
-torchvision
-pyyaml
-huggingface_hub
-safetensors>=0.2
+torch==1.14.0
+torchvision==0.15.0
+pyyaml==6.0
+huggingface_hub==0.16.4
+safetensors==0.3.1
