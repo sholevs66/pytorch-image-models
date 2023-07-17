@@ -51,36 +51,52 @@ _logger = logging.getLogger(__name__)
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_norm=False, attn_drop=0., proj_drop=0., norm_layer=None, prenorm_layer=None, proj_norm_layer=None):
+    fused_attn: Final[bool]
+
+    def __init__(
+            self,
+            dim,
+            num_heads=8,
+            qkv_bias=False,
+            qk_norm=False,
+            attn_drop=0.,
+            proj_drop=0.,
+            norm_layer=nn.LayerNorm,
+    ):
         super().__init__()
+        assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = head_dim ** -0.5
+        self.head_dim = dim // num_heads
+        self.scale = self.head_dim ** -0.5
+        self.fused_attn = use_fused_attn()
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        prenorm_layer = prenorm_layer or nn.Identity
-        self.prenorm = prenorm_layer(dim)
-
-        proj_norm_layer = proj_norm_layer or nn.Identity
-        self.proj_norm = proj_norm_layer(dim)
-
     def forward(self, x):
-        x = self.prenorm(x) # x = [b, seq_len, dim] = [b, 197, 192]
         B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)  q=[b, num_heads, seq_len, dim/num_heads] = [b, 3, 197, 64]
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv.unbind(0)
+        q, k = self.q_norm(q), self.k_norm(k)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale  # [b, num_heas, seq_len, seq_len] = [b, 3, 197, 197]
-        attn = attn.softmax(dim=-1)   # [b, num_heas, seq_len, seq_len] = [b, 3, 197, 197]
-        attn = self.attn_drop(attn)
+        if self.fused_attn:
+            x = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=self.attn_drop.p,
+            )
+        else:
+            q = q * self.scale
+            attn = q @ k.transpose(-2, -1)
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+            x = attn @ v
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)  # [b, seq_len, dim] = [b, 197, 192]
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
-        x = self.proj_norm(x)
         x = self.proj_drop(x)
         return x
 
@@ -1490,6 +1506,15 @@ def vit_tiny_patch16_224(pretrained=False, **kwargs) -> VisionTransformer:
     """
     model_args = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3)
     model = _create_vision_transformer('vit_tiny_patch16_224', pretrained=pretrained, **dict(model_args, **kwargs))
+    return model
+
+
+@register_model
+def vit_tiny_patch16_384(pretrained=False, **kwargs) -> VisionTransformer:
+    """ ViT-Tiny (Vit-Ti/16) @ 384x384.
+    """
+    model_args = dict(patch_size=16, embed_dim=192, depth=12, num_heads=3)
+    model = _create_vision_transformer('vit_tiny_patch16_384', pretrained=pretrained, **dict(model_args, **kwargs))
     return model
 
 
