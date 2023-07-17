@@ -1,5 +1,5 @@
-torch==1.13.1
-torchvision==0.15.0
+torch==1.14.0a0+44dac51
+torchvision==0.15.0a0
 pyyaml==6.0
 huggingface_hub==0.16.4
 safetensors==0.3.1
